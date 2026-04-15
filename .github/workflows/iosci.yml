@@ -35,7 +35,7 @@ jobs:
           LMV="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
           CMAKE="./Amethyst-iOS/Natives/CMakeLists.txt"
           JAVA="./Amethyst-iOS/Natives/JavaLauncher.m"
-          UTILS="./Amethyst-iOS/Natives/utils.m"
+          PATCH_FILE="./Amethyst-iOS/Natives/dyld_patch_platform.m"
 
           # 1. Repair JavaLauncher headers (Mach fix)
           if [ -f "$JAVA" ]; then
@@ -43,12 +43,12 @@ jobs:
             cat head.tmp "$JAVA" > "$JAVA.new" && mv "$JAVA.new" "$JAVA"
           fi
 
-          # 2. THE NUCLEAR LINKER FIX: Define __UISolariumEnabled in utils.m
-          # We use void* to make it a generic symbol that any linker can grasp
-          if [ -f "$UTILS" ]; then
-            printf '#include <stdbool.h>\nbool __UISolariumEnabled = false;\n' > head.tmp
-            cat head.tmp "$UTILS" > "$UTILS.new" && mv "$UTILS.new" "$UTILS"
-            echo "✅ Defined __UISolariumEnabled in utils.m"
+          # 2. THE ULTIMATE LINKER FIX: Global C-Symbol Injection
+          # We use __attribute__((visibility("default"))) to ensure arm64 sees it
+          if [ -f "$PATCH_FILE" ]; then
+            printf '#include <stdbool.h>\n__attribute__((visibility("default"))) bool __UISolariumEnabled = false;\n' > head.tmp
+            cat head.tmp "$PATCH_FILE" > "$PATCH_FILE.new" && mv "$PATCH_FILE.new" "$PATCH_FILE"
+            echo "✅ Forced global visibility of __UISolariumEnabled in dyld_patch_platform"
           fi
 
           # 3. Inject PortalLibrary.m
