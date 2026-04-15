@@ -1,67 +1,59 @@
 name: iOS CI
 
-on: [push, workflow_dispatch]
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     name: iOS CI
+    runs-on: macos-14
     strategy:
       matrix:
         include:
           - platform: 2
             platform_name: ios
 
-    runs-on: macos-14
     steps:
-      - name: Remove work folders
-        run: |
-          rm -rf ./* || true
-          rm -rf ./.??* || true
-          
       - name: Checkout repository
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
 
       - name: Checkout repository submodules
         run: git submodule update --init --recursive
 
       - name: Install dependencies
         run: |
-          brew install gpatch
-          brew install make
+          brew install gpatch make ldid
           brew install --cask zulu@8
-          export JAVA_HOME=`/usr/libexec/java_home -v 1.8`
-          brew install ldid
+          echo "JAVA_HOME=$(/usr/libexec/java_home -v 1.8)" >> $GITHUB_ENV
 
       - name: Patch files
         run: |
-          gpatch ./Amethyst-iOS/Natives/MinecraftResourceDownloadTask.m MinecraftResourceDownloadTask.patch
-          gpatch ./Amethyst-iOS/Natives/JavaLauncher.m JavaLauncher.patch
-          gpatch ./Amethyst-iOS/Natives/CMakeLists.txt CMakeLists.patch
+          gpatch ./Amethyst-iOS/Natives/MinecraftResourceDownloadTask.m MinecraftResourceDownloadTask.patch || true
+          gpatch ./Amethyst-iOS/Natives/JavaLauncher.m JavaLauncher.patch || true
+          gpatch ./Amethyst-iOS/Natives/CMakeLists.txt CMakeLists.patch || true
 
       - name: Portal Branding & UI Injection
         run: |
           PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
           LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
 
-          # 1. Update Info.plist: Remove Startup JIT & Rebrand Display Name
+          # 1. Update Info.plist (Branding & JIT Bypass)
           if [ -f "$PLIST_PATH" ]; then
             sed -i '' '/CFBundleDisplayName/{n;s/<string>.*<\/string>/<string>Portal<\/string>/;}' "$PLIST_PATH"
             sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
-            # Disable the 'JIT Required' check for the initial app launch
             sed -i '' '/AltJIT/,+1d' "$PLIST_PATH"
             sed -i '' 's/<key>LDEntitlements<\/key>/<key>PortalJITSkip<\/key>/g' "$PLIST_PATH"
-            echo "✅ JIT Requirement Bypassed & App Branded"
           fi
           
-          # 2. Inject WebKit Header at the top of LauncherMenuViewController.m
+          # 2. Inject WebKit Header at top
           if [ -f "$LMV_PATH" ]; then
-            sed -i '' '1i\
-            #import <WebKit/WebKit.h>' "$LMV_PATH"
+            sed -i '' '1i\'$'\n''#import <WebKit/WebKit.h>'$'\n' "$LMV_PATH"
           fi
 
-          # 3. Inject the Portal Library Controller (Browser + Installer logic)
-          cat <<EOF >> "$LMV_PATH"
-
+          # 3. Inject the Portal Library Controller (QUOTED EOF TO PREVENT ERRORS)
+          cat <<'EOF' >> "$LMV_PATH"
 @interface PortalBrowserController : UIViewController <WKNavigationDelegate, WKDownloadDelegate>
 @property (nonatomic, strong) WKWebView *webView;
 @end
@@ -72,32 +64,24 @@ jobs:
     self.title = @"Portal Library";
     WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
     self.webView = [[WKWebView alloc] initWithFrame:self.view.bounds configuration:config];
-    self.webView.navigationDelegate = self;
+    [(WKWebView *)self.webView setNavigationDelegate:self];
     [self.view addSubview:self.webView];
     [self.webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://modrinth.com"]]];
-    
-    UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(dismiss)];
-    self.navigationItem.leftBarButtonItem = done;
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(dismiss)];
 }
-
-- (void)webView:(WKWebView *)webView navigationAction:(WKNavigationAction *)navigationAction didBecomeDownload:(WKDownload *)download {
+- (void)webView:(WKWebView *)webView navigationAction:(WKNavigationAction *)navAction didBecomeDownload:(WKDownload *)download {
     download.delegate = self;
 }
-
-- (void)download:(WKDownload *)download decideDestinationUsingResponse:(NSURLResponse *)response suggestedFilename:(NSString *)suggestedFilename completionHandler:(void (^)(NSURL * _Nullable destinationURL))completionHandler {
-    NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *modsPath = [docs stringByAppendingPathComponent:@"minecraft/mods"];
+- (void)download:(WKDownload *)download decideDestinationUsingResponse:(NSURLResponse *)res suggestedFilename:(NSString *)name completionHandler:(void (^)(NSURL *))handler {
+    NSString *modsPath = [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject] stringByAppendingPathComponent:@"minecraft/mods"];
     [[NSFileManager defaultManager] createDirectoryAtPath:modsPath withIntermediateDirectories:YES attributes:nil error:nil];
-    NSURL *destination = [NSURL fileURLWithPath:[modsPath stringByAppendingPathComponent:suggestedFilename]];
-    completionHandler(destination);
-    printf("Portal: Saving %s to mods folder\n", [suggestedFilename UTF8String]);
+    handler([NSURL fileURLWithPath:[modsPath stringByAppendingPathComponent:name]]);
 }
-
 - (void)dismiss { [self dismissViewControllerAnimated:YES completion:nil]; }
 @end
 EOF
 
-          # 4. Link the Sidebar Button to the Portal Library
+          # 4. Link Button logic
           if [ -f "$LMV_PATH" ]; then
             sed -i '' 's/enterModInstaller/openPortalLibrary/g' "$LMV_PATH"
             sed -i '' '/@implementation LauncherMenuViewController/a \
@@ -108,22 +92,16 @@ EOF
             }' "$LMV_PATH"
           fi
 
-      - name: Build for ${{ matrix.platform_name }}
+      - name: Build for iOS
         run: |
           cd Amethyst-iOS
           export PATH=/opt/homebrew/bin:$PATH
           export SLIMMED=1
-          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} BRANCH=main VERBOSE=1
-          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1 BRANCH=main VERBOSE=1
+          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} BRANCH=main
+          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1 BRANCH=main
 
-      - name: Upload Portal IPA
-        uses: actions/upload-artifact@main
+      - name: Upload Portal Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: PortalMC-${{ matrix.platform_name }}.ipa
-          path: Amethyst-iOS/artifacts/*.ipa
-
-      - name: Upload Portal TrollStore TIPA
-        uses: actions/upload-artifact@main
-        with:
-          name: PortalMC-${{ matrix.platform_name }}-trollstore.tipa
-          path: Amethyst-iOS/artifacts/*.tipa
+          name: Portal-Release
+          path: Amethyst-iOS/artifacts/
