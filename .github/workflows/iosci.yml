@@ -40,27 +40,28 @@ jobs:
 
       - name: Portal Branding & UI Injection
         run: |
-          # Define paths - Target the original Amethyst paths to prevent ldid crashes
           PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
           LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
 
-          # 1. Update Display Name and Bundle ID in Info.plist
-          # We keep the executable name as AngelAuraAmethyst so the Makefile doesn't break
+          # 1. ONLY change the Display Name (Home Screen Name)
+          # We use a very specific sed command to target only the string after CFBundleDisplayName
           if [ -f "$PLIST_PATH" ]; then
-            sed -i '' 's/<string>Amethyst<\/string>/<string>Portal<\/string>/g' "$PLIST_PATH"
+            # This replaces the name without touching the executable name
+            sed -i '' '/CFBundleDisplayName/{n;s/<string>.*<\/string>/<string>Portal<\/string>/;}' "$PLIST_PATH"
+            # Change the Bundle ID so it doesn't conflict with official Amethyst
             sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
-            echo "✅ Display Name changed to Portal"
+            echo "✅ Display Name set to Portal"
           fi
           
-          # 2. Inject the Portal Library button into the Sidebar Menu
+          # 2. Inject the Portal Library button
           if [ -f "$LMV_PATH" ]; then
-            # Adds the new menu item right after the Preferences button
+            # We add a simpler menu item that we know won't crash the compiler
             sed -i '' '/LauncherPreferencesViewController.class/a \
-            [LauncherMenuCustomItem vcClass:LauncherNewsViewController.class],' "$LMV_PATH"
+            [LauncherMenuCustomItem title:@"Portal Library" imageName:@"square.grid.2x2" action:^{ [contentNavigationController performSelector:@selector(enterModInstaller)]; }],' "$LMV_PATH"
             
-            # Change any "Amethyst" UI text to "Portal"
+            # Change UI text mentions
             sed -i '' 's/Amethyst/Portal/g' "$LMV_PATH"
-            echo "✅ UI Injected into $LMV_PATH"
+            echo "✅ UI Injected"
           fi
 
       - name: Build for ${{ matrix.platform_name }}
