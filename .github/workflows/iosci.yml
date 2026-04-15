@@ -1,4 +1,5 @@
 name: iOS CI
+
 on:
   push:
     branches: [ main ]
@@ -21,10 +22,36 @@ jobs:
           brew install --cask zulu@8
           echo "JAVA_HOME=$(/usr/libexec/java_home -v 1.8)" >> $GITHUB_ENV
 
-      - name: Run Portal Injection
+      - name: Portal Component Injection
         run: |
-          chmod +x inject_portal.sh
-          ./inject_portal.sh
+          # Define Paths
+          PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
+          LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
+          CMAKE_PATH="./Amethyst-iOS/Natives/CMakeLists.txt"
+
+          # 1. Move your code into the submodule
+          cp PortalLibrary.m ./Amethyst-iOS/Natives/PortalLibrary.m
+          
+          # 2. Rebrand & Bypass JIT
+          sed -i '' '/CFBundleDisplayName/{n;s/<string>.*<\/string>/<string>Portal<\/string>/;}' "$PLIST_PATH"
+          sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
+          sed -i '' '/AltJIT/,+1d' "$PLIST_PATH"
+          sed -i '' 's/<key>LDEntitlements<\/key>/<key>PortalJITSkip<\/key>/g' "$PLIST_PATH"
+
+          # 3. Import the file into the Menu
+          sed -i '' '1i\'$'\n''#import "PortalLibrary.m"'$'\n' "$LMV_PATH"
+
+          # 4. Swap button and add launch logic
+          sed -i '' 's/enterModInstaller/openPortalLibrary/g' "$LMV_PATH"
+          sed -i '' '/@implementation LauncherMenuViewController/a \
+          - (void)openPortalLibrary { \
+            PortalBrowserController *pbc = [[PortalBrowserController alloc] init]; \
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pbc]; \
+            [self presentViewController:nav animated:YES completion:nil]; \
+          }' "$LMV_PATH"
+
+          # 5. Tell CMake to compile the new file
+          sed -i '' 's/LauncherMenuViewController.m/LauncherMenuViewController.m PortalLibrary.m/g' "$CMAKE_PATH"
 
       - name: Build for iOS
         run: |
@@ -34,8 +61,8 @@ jobs:
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 BRANCH=main
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 TROLLSTORE_JIT_ENT=1 BRANCH=main
 
-      - name: Upload Portal Artifacts
+      - name: Upload Portal IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Portal-Release
+          name: Portal-Build
           path: Amethyst-iOS/artifacts/
