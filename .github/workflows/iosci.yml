@@ -41,9 +41,10 @@ jobs:
             sed -i '' '1i\'$'\n''#import <mach/mach.h>'$'\n''#import <mach/task.h>'$'\n' "$JAVA_LAUNCHER"
           fi
 
-          # 2. Fix Linker Error: Define missing __UISolariumEnabled
+          # 2. Fix Linker Error: Define missing __UISolariumEnabled with proper headers
           if [ -f "$MAIN_PATH" ]; then
-            sed -i '' '1i\'$'\n''BOOL __UISolariumEnabled = NO;'$'\n' "$MAIN_PATH"
+            sed -i '' '1i\'$'\n''#import <Foundation/Foundation.h>'$'\n''BOOL __UISolariumEnabled = NO;'$'\n' "$MAIN_PATH"
+            echo "✅ Defined __UISolariumEnabled with Foundation in main.m"
           fi
 
           # 3. Inject PortalLibrary.m
@@ -59,19 +60,23 @@ jobs:
           sed -i '' '/AltJIT/,+1d' "$PLIST_PATH"
           sed -i '' 's/<key>LDEntitlements<\/key>/<key>PortalJITSkip<\/key>/g' "$PLIST_PATH"
 
-          # 5. Tell the Menu the Class exists (using @class to avoid duplicates)
+          # 5. Tell the Menu the Class exists
           sed -i '' '1i\'$'\n''@class PortalBrowserController;'$'\n' "$LMV_PATH"
 
           # 6. Swap Button & Launcher Logic
+          # Using NSClassFromString ensures we don't have linking conflicts at compile time
           sed -i '' 's/enterModInstaller/openPortalLibrary/g' "$LMV_PATH"
           sed -i '' '/@implementation LauncherMenuViewController/a \
           - (void)openPortalLibrary { \
-            id pbc = [[NSClassFromString(@"PortalBrowserController") alloc] init]; \
-            id nav = [[UINavigationController alloc] initWithRootViewController:pbc]; \
-            [self presentViewController:nav animated:YES completion:nil]; \
+            Class pbcClass = NSClassFromString(@"PortalBrowserController"); \
+            if (pbcClass) { \
+              id pbc = [[pbcClass alloc] init]; \
+              UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pbc]; \
+              [self presentViewController:nav animated:YES completion:nil]; \
+            } \
           }' "$LMV_PATH"
 
-          # 7. Add to CMake (This handles the actual compilation)
+          # 7. Add to CMake
           sed -i '' 's/LauncherMenuViewController.m/LauncherMenuViewController.m PortalLibrary.m/g' "$CMAKE_PATH"
 
       - name: Build for iOS
