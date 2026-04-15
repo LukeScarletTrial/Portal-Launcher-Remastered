@@ -1,30 +1,85 @@
-- name: Portal Branding & UI Injection
+name: iOS CI
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    name: iOS CI
+    strategy:
+      matrix:
+        include:
+          - platform: 2
+            platform_name: ios
+
+    runs-on: macos-14
+    steps:
+      - name: Remove work folders
         run: |
-          # 1. Change the name the user sees on the Home Screen
-          # We edit the Info.plist but KEEP the folder names as Amethyst
+          rm -rf ./* || true
+          rm -rf ./.??* || true
+          
+      - name: Checkout repository
+        uses: actions/checkout@main
+
+      - name: Checkout repository submodules
+        run: git submodule update --init --recursive
+
+      - name: Install dependencies
+        run: |
+          brew install gpatch
+          brew install make
+          brew install --cask zulu@8
+          export JAVA_HOME=`/usr/libexec/java_home -v 1.8`
+          brew install ldid
+
+      - name: Patch files
+        run: |
+          gpatch ./Amethyst-iOS/Natives/MinecraftResourceDownloadTask.m MinecraftResourceDownloadTask.patch
+          gpatch ./Amethyst-iOS/Natives/JavaLauncher.m JavaLauncher.patch
+          gpatch ./Amethyst-iOS/Natives/CMakeLists.txt CMakeLists.patch
+
+      - name: Portal Branding & UI Injection
+        run: |
+          # Define paths - Target the original Amethyst paths to prevent ldid crashes
           PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
+          LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
+
+          # 1. Update Display Name and Bundle ID in Info.plist
+          # We keep the executable name as AngelAuraAmethyst so the Makefile doesn't break
           if [ -f "$PLIST_PATH" ]; then
             sed -i '' 's/<string>Amethyst<\/string>/<string>Portal<\/string>/g' "$PLIST_PATH"
             sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
             echo "✅ Display Name changed to Portal"
           fi
           
-          # 2. Inject the Portal Library button into the Sidebar
-          LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
+          # 2. Inject the Portal Library button into the Sidebar Menu
           if [ -f "$LMV_PATH" ]; then
-            # Adds the button after the preferences item
+            # Adds the new menu item right after the Preferences button
             sed -i '' '/LauncherPreferencesViewController.class/a \
             [LauncherMenuCustomItem vcClass:LauncherNewsViewController.class],' "$LMV_PATH"
             
-            # Change any "Amethyst" text in the UI to "Portal"
+            # Change any "Amethyst" UI text to "Portal"
             sed -i '' 's/Amethyst/Portal/g' "$LMV_PATH"
-            echo "✅ Menu Button Injected"
+            echo "✅ UI Injected into $LMV_PATH"
           fi
 
-          # 3. Fix the Makefile to ensure it doesn't look for the wrong thing
-          # We revert any previous AngelAuraPortal changes back to AngelAuraAmethyst
-          # so the build actually finishes.
-          MAKE_PATH="./Amethyst-iOS/Makefile"
-          if [ -f "$MAKE_PATH" ]; then
-            sed -i '' 's/AngelAuraPortal/AngelAuraAmethyst/g' "$MAKE_PATH"
-          fi
+      - name: Build for ${{ matrix.platform_name }}
+        run: |
+          cd Amethyst-iOS
+          export PATH=/opt/homebrew/bin:$PATH
+          export SLIMMED=1
+          # We build using standard parameters to ensure stability
+          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} BRANCH=main VERBOSE=1
+          gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1 BRANCH=main VERBOSE=1
+
+      - name: Upload Portal IPA
+        uses: actions/upload-artifact@main
+        with:
+          name: PortalMC-${{ matrix.platform_name }}.ipa
+          path: Amethyst-iOS/artifacts/*.ipa
+
+      - name: Upload Portal TrollStore TIPA
+        uses: actions/upload-artifact@main
+        with:
+          name: PortalMC-${{ matrix.platform_name }}-trollstore.tipa
+          path: Amethyst-iOS/artifacts/*.tipa
