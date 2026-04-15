@@ -28,14 +28,13 @@ jobs:
           brew install --cask zulu@8
           echo "JAVA_HOME=$(/usr/libexec/java_home -v 1.8)" >> $GITHUB_ENV
 
-      - name: Portal Component & Linker Repair
+      - name: Portal Component & Global Symbol Injection
         run: |
-          # Define paths
+          # Paths
           PLIST="./Amethyst-iOS/Natives/Info.plist"
           LMV="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
           CMAKE="./Amethyst-iOS/Natives/CMakeLists.txt"
           JAVA="./Amethyst-iOS/Natives/JavaLauncher.m"
-          PATCH_FILE="./Amethyst-iOS/Natives/dyld_patch_platform.m"
 
           # 1. Repair JavaLauncher headers (Mach fix)
           if [ -f "$JAVA" ]; then
@@ -43,12 +42,12 @@ jobs:
             cat head.tmp "$JAVA" > "$JAVA.new" && mv "$JAVA.new" "$JAVA"
           fi
 
-          # 2. THE ULTIMATE LINKER FIX: Global C-Symbol Injection
-          # We use __attribute__((visibility("default"))) to ensure arm64 sees it
-          if [ -f "$PATCH_FILE" ]; then
-            printf '#include <stdbool.h>\n__attribute__((visibility("default"))) bool __UISolariumEnabled = false;\n' > head.tmp
-            cat head.tmp "$PATCH_FILE" > "$PATCH_FILE.new" && mv "$PATCH_FILE.new" "$PATCH_FILE"
-            echo "✅ Forced global visibility of __UISolariumEnabled in dyld_patch_platform"
+          # 2. THE ULTIMATE LINKER FIX: Define symbol via CMake
+          # This forces the linker to define __UISolariumEnabled as a 0 (false) globally
+          if [ -f "$CMAKE" ]; then
+            sed -i '' 's/target_link_libraries/add_definitions("-D__UISolariumEnabled=0")\ntarget_link_libraries/g' "$CMAKE"
+            echo "set(CMAKE_EXE_LINKER_FLAGS \"${CMAKE_EXE_LINKER_FLAGS} -Wl,-alias,_main,_main -Wl,-U,__UISolariumEnabled\")" >> "$CMAKE"
+            echo "✅ Injected Linker Override into CMake"
           fi
 
           # 3. Inject PortalLibrary.m
@@ -68,7 +67,7 @@ jobs:
           
           printf '\n@implementation LauncherMenuViewController (Portal)\n- (void)openPortalLibrary {\n    Class pbcClass = NSClassFromString(@"PortalBrowserController");\n    if (pbcClass) {\n        id pbc = [[pbcClass alloc] init];\n        id nav = [[UINavigationController alloc] initWithRootViewController:pbc];\n        [self presentViewController:nav animated:YES completion:nil];\n    }\n}\n@end\n' >> "$LMV"
 
-          # 7. Update CMakeLists
+          # 7. Update CMakeLists Source List
           sed -i '' 's/LauncherMenuViewController.m/LauncherMenuViewController.m PortalLibrary.m/g' "$CMAKE"
 
       - name: Build for iOS
