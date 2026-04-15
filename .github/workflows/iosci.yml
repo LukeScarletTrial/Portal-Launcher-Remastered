@@ -30,54 +30,45 @@ jobs:
 
       - name: Portal Component & Linker Repair
         run: |
-          PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
-          LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
-          CMAKE_PATH="./Amethyst-iOS/Natives/CMakeLists.txt"
-          JAVA_LAUNCHER="./Amethyst-iOS/Natives/JavaLauncher.m"
-          MAIN_PATH="./Amethyst-iOS/Natives/main.m"
+          # Define paths for clarity
+          PLIST="./Amethyst-iOS/Natives/Info.plist"
+          LMV="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
+          CMAKE="./Amethyst-iOS/Natives/CMakeLists.txt"
+          JAVA="./Amethyst-iOS/Natives/JavaLauncher.m"
+          MAIN="./Amethyst-iOS/Natives/main.m"
 
-          # 1. Fix JavaLauncher Mach headers
-          if [ -f "$JAVA_LAUNCHER" ]; then
-            sed -i '' '1i\'$'\n''#import <mach/mach.h>'$'\n''#import <mach/task.h>'$'\n' "$JAVA_LAUNCHER"
+          # 1. Repair JavaLauncher headers (Mach fix)
+          if [ -f "$JAVA" ]; then
+            printf '#import <mach/mach.h>\n#import <mach/task.h>\n' > head.tmp
+            cat head.tmp "$JAVA" > "$JAVA.new" && mv "$JAVA.new" "$JAVA"
           fi
 
-          # 2. Fix Linker Error: Define missing __UISolariumEnabled with proper headers
-          if [ -f "$MAIN_PATH" ]; then
-            sed -i '' '1i\'$'\n''#import <Foundation/Foundation.h>'$'\n''BOOL __UISolariumEnabled = NO;'$'\n' "$MAIN_PATH"
-            echo "✅ Defined __UISolariumEnabled with Foundation in main.m"
+          # 2. Define __UISolariumEnabled in main.m
+          if [ -f "$MAIN" ]; then
+            printf '#import <Foundation/Foundation.h>\nBOOL __UISolariumEnabled = NO;\n' > head.tmp
+            cat head.tmp "$MAIN" > "$MAIN.new" && mv "$MAIN.new" "$MAIN"
           fi
 
           # 3. Inject PortalLibrary.m
-          if [ -f "PortalLibrary.m" ]; then
-            cp PortalLibrary.m ./Amethyst-iOS/Natives/PortalLibrary.m
-          else
-            echo "PortalLibrary.m missing!" && exit 1
-          fi
+          cp PortalLibrary.m ./Amethyst-iOS/Natives/PortalLibrary.m
           
           # 4. Rebrand & Bypass JIT
-          sed -i '' '/CFBundleDisplayName/{n;s/<string>.*<\/string>/<string>Portal<\/string>/;}' "$PLIST_PATH"
-          sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
-          sed -i '' '/AltJIT/,+1d' "$PLIST_PATH"
-          sed -i '' 's/<key>LDEntitlements<\/key>/<key>PortalJITSkip<\/key>/g' "$PLIST_PATH"
+          sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST"
+          sed -i '' '/AltJIT/,+1d' "$PLIST"
+          sed -i '' 's/<key>LDEntitlements<\/key>/<key>PortalJITSkip<\/key>/g' "$PLIST"
 
-          # 5. Tell the Menu the Class exists
-          sed -i '' '1i\'$'\n''@class PortalBrowserController;'$'\n' "$LMV_PATH"
+          # 5. Prepare Menu for Portal Browser
+          printf '@class PortalBrowserController;\n' > head.tmp
+          cat head.tmp "$LMV" > "$LMV.new" && mv "$LMV.new" "$LMV"
 
-          # 6. Swap Button & Launcher Logic
-          # Using NSClassFromString ensures we don't have linking conflicts at compile time
-          sed -i '' 's/enterModInstaller/openPortalLibrary/g' "$LMV_PATH"
-          sed -i '' '/@implementation LauncherMenuViewController/a \
-          - (void)openPortalLibrary { \
-            Class pbcClass = NSClassFromString(@"PortalBrowserController"); \
-            if (pbcClass) { \
-              id pbc = [[pbcClass alloc] init]; \
-              UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pbc]; \
-              [self presentViewController:nav animated:YES completion:nil]; \
-            } \
-          }' "$LMV_PATH"
+          # 6. Swap Button & Add Controller Logic
+          sed -i '' 's/enterModInstaller/openPortalLibrary/g' "$LMV"
+          
+          # Append the implementation at the very end of the file
+          printf '\n@implementation LauncherMenuViewController (Portal)\n- (void)openPortalLibrary {\n    Class pbcClass = NSClassFromString(@"PortalBrowserController");\n    if (pbcClass) {\n        id pbc = [[pbcClass alloc] init];\n        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pbc];\n        [self presentViewController:nav animated:YES completion:nil];\n    }\n}\n@end\n' >> "$LMV"
 
-          # 7. Add to CMake
-          sed -i '' 's/LauncherMenuViewController.m/LauncherMenuViewController.m PortalLibrary.m/g' "$CMAKE_PATH"
+          # 7. Update CMakeLists
+          sed -i '' 's/LauncherMenuViewController.m/LauncherMenuViewController.m PortalLibrary.m/g' "$CMAKE"
 
       - name: Build for iOS
         run: |
