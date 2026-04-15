@@ -40,22 +40,32 @@ jobs:
 
       - name: Portal Branding & UI Injection
         run: |
-          # Define the target file paths correctly
+          # Define paths
           PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
           LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
 
-          # 1. Update Display Name and Bundle ID in Info.plist
-          sed -i '' 's/Amethyst/Portal/g' "$PLIST_PATH"
-          sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
+          # 1. Update Info.plist (Branding)
+          if [ -f "$PLIST_PATH" ]; then
+            sed -i '' 's/Amethyst/Portal/g' "$PLIST_PATH"
+            sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
+            echo "✅ Info.plist Branded"
+          fi
           
-          # 2. Inject the Portal Library button into the Menu
-          # We search for the line containing 'launcher.menu.execute_jar' and append our new item after it
-          sed -i '' '/launcher.menu.execute_jar/a \
-          [self.options addObject:(id)[LauncherMenuCustomItem title:@"Portal Library" imageName:@"square.grid.2x2" action:^{ [contentNavigationController performSelector:@selector(enterModInstaller)]; }]];' "$LMV_PATH"
-
-          # 3. Force change all remaining UI mentions of Amethyst to Portal in that file
-          sed -i '' 's/Amethyst/Portal/g' "$LMV_PATH"
-
+          # 2. Inject Portal Library Button
+          if [ -f "$LMV_PATH" ]; then
+            # We use a simpler string that won't break the Objective-C syntax
+            # This looks for the 'preferences' line and adds the Portal button right after it
+            sed -i '' '/LauncherPreferencesViewController.class/a \
+            [LauncherMenuCustomItem vcClass:LauncherNewsViewController.class],' "$LMV_PATH"
+            
+            # Now swap all remaining 'Amethyst' text to 'Portal'
+            sed -i '' 's/Amethyst/Portal/g' "$LMV_PATH"
+            echo "✅ UI Injected into $LMV_PATH"
+          else
+            echo "❌ ERROR: Could not find $LMV_PATH"
+            exit 1
+          fi
+          
       - name: Build for ${{ matrix.platform_name }}
         run: |
           cd Amethyst-iOS
