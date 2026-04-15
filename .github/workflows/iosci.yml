@@ -35,7 +35,7 @@ jobs:
           LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
           CMAKE_PATH="./Amethyst-iOS/Natives/CMakeLists.txt"
           JAVA_LAUNCHER="./Amethyst-iOS/Natives/JavaLauncher.m"
-          UTILS_PATH="./Amethyst-iOS/Natives/utils.m"
+          MAIN_PATH="./Amethyst-iOS/Natives/main.m"
 
           # 1. Fix JavaLauncher.m Mach header errors
           if [ -f "$JAVA_LAUNCHER" ]; then
@@ -43,10 +43,11 @@ jobs:
             echo "✅ Repaired JavaLauncher headers"
           fi
 
-          # 2. Fix Linker Error: Define missing __UISolariumEnabled symbol
-          if [ -f "$UTILS_PATH" ]; then
-            echo "bool __UISolariumEnabled = false;" >> "$UTILS_PATH"
-            echo "✅ Defined missing symbol __UISolariumEnabled in utils.m"
+          # 2. Fix Linker Error: Define missing __UISolariumEnabled symbol in main.m
+          # We use a primitive C definition to ensure the linker finds it regardless of scope
+          if [ -f "$MAIN_PATH" ]; then
+            sed -i '' '1i\'$'\n''BOOL __UISolariumEnabled = NO;'$'\n' "$MAIN_PATH"
+            echo "✅ Defined missing symbol __UISolariumEnabled in main.m"
           fi
 
           # 3. Move your PortalLibrary code into the submodule
