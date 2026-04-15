@@ -35,7 +35,7 @@ jobs:
           LMV="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
           CMAKE="./Amethyst-iOS/Natives/CMakeLists.txt"
           JAVA="./Amethyst-iOS/Natives/JavaLauncher.m"
-          MAIN="./Amethyst-iOS/Natives/main.m"
+          UTILS="./Amethyst-iOS/Natives/utils.m"
 
           # 1. Repair JavaLauncher headers (Mach fix)
           if [ -f "$JAVA" ]; then
@@ -43,12 +43,12 @@ jobs:
             cat head.tmp "$JAVA" > "$JAVA.new" && mv "$JAVA.new" "$JAVA"
           fi
 
-          # 2. BRUTE FORCE LINKER FIX: Define __UISolariumEnabled globally
-          # We use attribute((used)) to force the linker to see it
-          if [ -f "$MAIN" ]; then
-            printf '#import <Foundation/Foundation.h>\nBOOL __UISolariumEnabled __attribute__((used)) = NO;\n' > head.tmp
-            cat head.tmp "$MAIN" > "$MAIN.new" && mv "$MAIN.new" "$MAIN"
-            echo "✅ Forced global definition of __UISolariumEnabled"
+          # 2. THE NUCLEAR LINKER FIX: Define __UISolariumEnabled in utils.m
+          # We use void* to make it a generic symbol that any linker can grasp
+          if [ -f "$UTILS" ]; then
+            printf '#include <stdbool.h>\nbool __UISolariumEnabled = false;\n' > head.tmp
+            cat head.tmp "$UTILS" > "$UTILS.new" && mv "$UTILS.new" "$UTILS"
+            echo "✅ Defined __UISolariumEnabled in utils.m"
           fi
 
           # 3. Inject PortalLibrary.m
@@ -66,7 +66,7 @@ jobs:
           # 6. Swap Button & Add Controller Logic
           sed -i '' 's/enterModInstaller/openPortalLibrary/g' "$LMV"
           
-          printf '\n@implementation LauncherMenuViewController (Portal)\n- (void)openPortalLibrary {\n    Class pbcClass = NSClassFromString(@"PortalBrowserController");\n    if (pbcClass) {\n        id pbc = [[pbcClass alloc] init];\n        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pbc];\n        [self presentViewController:nav animated:YES completion:nil];\n    }\n}\n@end\n' >> "$LMV"
+          printf '\n@implementation LauncherMenuViewController (Portal)\n- (void)openPortalLibrary {\n    Class pbcClass = NSClassFromString(@"PortalBrowserController");\n    if (pbcClass) {\n        id pbc = [[pbcClass alloc] init];\n        id nav = [[UINavigationController alloc] initWithRootViewController:pbc];\n        [self presentViewController:nav animated:YES completion:nil];\n    }\n}\n@end\n' >> "$LMV"
 
           # 7. Update CMakeLists
           sed -i '' 's/LauncherMenuViewController.m/LauncherMenuViewController.m PortalLibrary.m/g' "$CMAKE"
@@ -76,7 +76,6 @@ jobs:
           cd Amethyst-iOS
           export PATH=/opt/homebrew/bin:$PATH
           export SLIMMED=1
-          # Attempt build
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 BRANCH=main
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 TROLLSTORE_JIT_ENT=1 BRANCH=main
 
