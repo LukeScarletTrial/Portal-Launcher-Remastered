@@ -44,21 +44,29 @@ jobs:
           PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
           LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
           MAKE_PATH="./Amethyst-iOS/Makefile"
+          PROJECT_PATH="./Amethyst-iOS/Natives/AngelAuraAmethyst.xcodeproj/project.pbxproj"
 
-          # 1. Update Info.plist (The name inside the app)
+          # 1. Update the Makefile (Crucial for ldid and folder paths)
+          if [ -f "$MAKE_PATH" ]; then
+            sed -i '' 's/AngelAuraAmethyst/AngelAuraPortal/g' "$MAKE_PATH"
+            sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$MAKE_PATH"
+            echo "✅ Makefile Re-aligned"
+          fi
+
+          # 2. Update the Xcode Project File (This fixes the internal "cannot find Info.plist" error)
+          if [ -f "$PROJECT_PATH" ]; then
+            sed -i '' 's/AngelAuraAmethyst/AngelAuraPortal/g' "$PROJECT_PATH"
+            echo "✅ Xcode Project Re-aligned"
+          fi
+
+          # 3. Update Info.plist
           if [ -f "$PLIST_PATH" ]; then
             sed -i '' 's/Amethyst/Portal/g' "$PLIST_PATH"
             sed -i '' 's/AngelAuraAmethyst/AngelAuraPortal/g' "$PLIST_PATH"
             sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
           fi
           
-          # 2. Update the Makefile (The name the build system uses)
-          if [ -f "$MAKE_PATH" ]; then
-            sed -i '' 's/AngelAuraAmethyst/AngelAuraPortal/g' "$MAKE_PATH"
-            echo "✅ Makefile updated to search for AngelAuraPortal"
-          fi
-
-          # 3. Inject Portal Library Button into UI
+          # 4. Inject Portal Library Button into UI
           if [ -f "$LMV_PATH" ]; then
             sed -i '' '/LauncherPreferencesViewController.class/a \
             [LauncherMenuCustomItem vcClass:LauncherNewsViewController.class],' "$LMV_PATH"
