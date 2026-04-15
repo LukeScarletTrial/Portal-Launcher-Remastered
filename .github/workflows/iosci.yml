@@ -28,42 +28,49 @@ jobs:
           brew install --cask zulu@8
           echo "JAVA_HOME=$(/usr/libexec/java_home -v 1.8)" >> $GITHUB_ENV
 
-      - name: Portal Component & Header Repair
+      - name: Portal Component & Linker Repair
         run: |
           # Define Paths
           PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
           LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
           CMAKE_PATH="./Amethyst-iOS/Natives/CMakeLists.txt"
           JAVA_LAUNCHER="./Amethyst-iOS/Natives/JavaLauncher.m"
+          UTILS_PATH="./Amethyst-iOS/Natives/utils.m"
 
-          # 1. Fix the JavaLauncher.m errors (Repair missing Mach headers causing Error 1)
+          # 1. Fix JavaLauncher.m Mach header errors
           if [ -f "$JAVA_LAUNCHER" ]; then
             sed -i '' '1i\'$'\n''#import <mach/mach.h>'$'\n''#import <mach/task.h>'$'\n' "$JAVA_LAUNCHER"
             echo "✅ Repaired JavaLauncher headers"
           fi
 
-          # 2. Move your code into the submodule
+          # 2. Fix Linker Error: Define missing __UISolariumEnabled symbol
+          if [ -f "$UTILS_PATH" ]; then
+            echo "bool __UISolariumEnabled = false;" >> "$UTILS_PATH"
+            echo "✅ Defined missing symbol __UISolariumEnabled in utils.m"
+          fi
+
+          # 3. Move your PortalLibrary code into the submodule
           if [ -f "PortalLibrary.m" ]; then
             cp PortalLibrary.m ./Amethyst-iOS/Natives/PortalLibrary.m
-            echo "✅ PortalLibrary.m moved to Natives"
+            echo "✅ PortalLibrary.m injected"
           else
-            echo "❌ PortalLibrary.m NOT FOUND in main directory!"
+            echo "❌ PortalLibrary.m NOT FOUND!"
             exit 1
           fi
           
-          # 3. Rebrand & Bypass JIT (Removes AltJIT requirement for app launch)
+          # 4. Rebrand & Bypass JIT
           if [ -f "$PLIST_PATH" ]; then
             sed -i '' '/CFBundleDisplayName/{n;s/<string>.*<\/string>/<string>Portal<\/string>/;}' "$PLIST_PATH"
             sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
             sed -i '' '/AltJIT/,+1d' "$PLIST_PATH"
             sed -i '' 's/<key>LDEntitlements<\/key>/<key>PortalJITSkip<\/key>/g' "$PLIST_PATH"
-            echo "✅ Info.plist rebranded and JIT bypassed"
+            echo "✅ Rebranded and JIT Bypassed"
           fi
 
-          # 4. Import the file into the Menu
+          # 5. Import the Library into the Menu
           sed -i '' '1i\'$'\n''#import "PortalLibrary.m"'$'\n' "$LMV_PATH"
 
-          # 5. Swap button and add launch logic
+          # 6. Swap Button & Add Launch Logic
           sed -i '' 's/enterModInstaller/openPortalLibrary/g' "$LMV_PATH"
           sed -i '' '/@implementation LauncherMenuViewController/a \
           - (void)openPortalLibrary { \
@@ -72,10 +79,10 @@ jobs:
             [self presentViewController:nav animated:YES completion:nil]; \
           }' "$LMV_PATH"
 
-          # 6. Tell CMake to compile the new file
+          # 7. Add PortalLibrary.m to CMake compilation list
           if [ -f "$CMAKE_PATH" ]; then
             sed -i '' 's/LauncherMenuViewController.m/LauncherMenuViewController.m PortalLibrary.m/g' "$CMAKE_PATH"
-            echo "✅ CMakeLists updated to include PortalLibrary.m"
+            echo "✅ Updated CMakeLists"
           fi
 
       - name: Build for iOS
@@ -83,12 +90,11 @@ jobs:
           cd Amethyst-iOS
           export PATH=/opt/homebrew/bin:$PATH
           export SLIMMED=1
-          # Build standard IPA and TrollStore version
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 BRANCH=main
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=2 TROLLSTORE_JIT_ENT=1 BRANCH=main
 
       - name: Upload Portal Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Portal-Release-Build
+          name: Portal-Remastered-IPA
           path: Amethyst-iOS/artifacts/
