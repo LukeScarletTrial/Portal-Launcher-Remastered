@@ -43,25 +43,69 @@ jobs:
           PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
           LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
 
-          # 1. ONLY change the Display Name (Home Screen Name)
-          # We use a very specific sed command to target only the string after CFBundleDisplayName
+          # 1. Update Info.plist: Remove Startup JIT & Rebrand Display Name
           if [ -f "$PLIST_PATH" ]; then
-            # This replaces the name without touching the executable name
             sed -i '' '/CFBundleDisplayName/{n;s/<string>.*<\/string>/<string>Portal<\/string>/;}' "$PLIST_PATH"
-            # Change the Bundle ID so it doesn't conflict with official Amethyst
             sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
-            echo "✅ Display Name set to Portal"
+            # Disable the 'JIT Required' check for the initial app launch
+            sed -i '' '/AltJIT/,+1d' "$PLIST_PATH"
+            sed -i '' 's/<key>LDEntitlements<\/key>/<key>PortalJITSkip<\/key>/g' "$PLIST_PATH"
+            echo "✅ JIT Requirement Bypassed & App Branded"
           fi
           
-          # 2. Inject the Portal Library button
+          # 2. Inject WebKit Header at the top of LauncherMenuViewController.m
           if [ -f "$LMV_PATH" ]; then
-            # We add a simpler menu item that we know won't crash the compiler
-            sed -i '' '/LauncherPreferencesViewController.class/a \
-            [LauncherMenuCustomItem title:@"Portal Library" imageName:@"square.grid.2x2" action:^{ [contentNavigationController performSelector:@selector(enterModInstaller)]; }],' "$LMV_PATH"
-            
-            # Change UI text mentions
-            sed -i '' 's/Amethyst/Portal/g' "$LMV_PATH"
-            echo "✅ UI Injected"
+            sed -i '' '1i\
+            #import <WebKit/WebKit.h>' "$LMV_PATH"
+          fi
+
+          # 3. Inject the Portal Library Controller (Browser + Installer logic)
+          cat <<EOF >> "$LMV_PATH"
+
+@interface PortalBrowserController : UIViewController <WKNavigationDelegate, WKDownloadDelegate>
+@property (nonatomic, strong) WKWebView *webView;
+@end
+
+@implementation PortalBrowserController
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Portal Library";
+    WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+    self.webView = [[WKWebView alloc] initWithFrame:self.view.bounds configuration:config];
+    self.webView.navigationDelegate = self;
+    [self.view addSubview:self.webView];
+    [self.webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://modrinth.com"]]];
+    
+    UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(dismiss)];
+    self.navigationItem.leftBarButtonItem = done;
+}
+
+- (void)webView:(WKWebView *)webView navigationAction:(WKNavigationAction *)navigationAction didBecomeDownload:(WKDownload *)download {
+    download.delegate = self;
+}
+
+- (void)download:(WKDownload *)download decideDestinationUsingResponse:(NSURLResponse *)response suggestedFilename:(NSString *)suggestedFilename completionHandler:(void (^)(NSURL * _Nullable destinationURL))completionHandler {
+    NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    NSString *modsPath = [docs stringByAppendingPathComponent:@"minecraft/mods"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:modsPath withIntermediateDirectories:YES attributes:nil error:nil];
+    NSURL *destination = [NSURL fileURLWithPath:[modsPath stringByAppendingPathComponent:suggestedFilename]];
+    completionHandler(destination);
+    printf("Portal: Saving %s to mods folder\n", [suggestedFilename UTF8String]);
+}
+
+- (void)dismiss { [self dismissViewControllerAnimated:YES completion:nil]; }
+@end
+EOF
+
+          # 4. Link the Sidebar Button to the Portal Library
+          if [ -f "$LMV_PATH" ]; then
+            sed -i '' 's/enterModInstaller/openPortalLibrary/g' "$LMV_PATH"
+            sed -i '' '/@implementation LauncherMenuViewController/a \
+            - (void)openPortalLibrary { \
+              PortalBrowserController *pbc = [[PortalBrowserController alloc] init]; \
+              UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:pbc]; \
+              [self presentViewController:nav animated:YES completion:nil]; \
+            }' "$LMV_PATH"
           fi
 
       - name: Build for ${{ matrix.platform_name }}
@@ -69,7 +113,6 @@ jobs:
           cd Amethyst-iOS
           export PATH=/opt/homebrew/bin:$PATH
           export SLIMMED=1
-          # We build using standard parameters to ensure stability
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} BRANCH=main VERBOSE=1
           gmake -j$(sysctl -n hw.ncpu) dsym package PLATFORM=${{ matrix.platform }} TROLLSTORE_JIT_ENT=1 BRANCH=main VERBOSE=1
 
