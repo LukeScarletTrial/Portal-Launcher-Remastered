@@ -44,7 +44,8 @@ jobs:
           PLIST_PATH="./Amethyst-iOS/Natives/Info.plist"
           LMV_PATH="./Amethyst-iOS/Natives/LauncherMenuViewController.m"
           MAKE_PATH="./Amethyst-iOS/Makefile"
-          PROJECT_PATH="./Amethyst-iOS/Natives/AngelAuraAmethyst.xcodeproj/project.pbxproj"
+          PROJECT_DIR="./Amethyst-iOS/Natives/AngelAuraAmethyst.xcodeproj"
+          PBX_PATH="./Amethyst-iOS/Natives/AngelAuraAmethyst.xcodeproj/project.pbxproj"
 
           # 1. Update the Makefile (Crucial for ldid and folder paths)
           if [ -f "$MAKE_PATH" ]; then
@@ -53,20 +54,27 @@ jobs:
             echo "✅ Makefile Re-aligned"
           fi
 
-          # 2. Update the Xcode Project File (This fixes the internal "cannot find Info.plist" error)
-          if [ -f "$PROJECT_PATH" ]; then
-            sed -i '' 's/AngelAuraAmethyst/AngelAuraPortal/g' "$PROJECT_PATH"
-            echo "✅ Xcode Project Re-aligned"
+          # 2. Update the Xcode Project File Internal References
+          if [ -f "$PBX_PATH" ]; then
+            sed -i '' 's/AngelAuraAmethyst/AngelAuraPortal/g' "$PBX_PATH"
+            echo "✅ Project File Internal Re-aligned"
           fi
 
-          # 3. Update Info.plist
+          # 3. Rename the Project Folder on Disk so Makefile finds it
+          if [ -d "$PROJECT_DIR" ]; then
+            mv "$PROJECT_DIR" "./Amethyst-iOS/Natives/AngelAuraPortal.xcodeproj"
+            echo "✅ Project Folder Renamed"
+          fi
+
+          # 4. Update Info.plist
           if [ -f "$PLIST_PATH" ]; then
             sed -i '' 's/Amethyst/Portal/g' "$PLIST_PATH"
             sed -i '' 's/AngelAuraAmethyst/AngelAuraPortal/g' "$PLIST_PATH"
             sed -i '' 's/org.angelauramc.amethyst/com.portalmc.portal/g' "$PLIST_PATH"
+            echo "✅ Info.plist Re-aligned"
           fi
           
-          # 4. Inject Portal Library Button into UI
+          # 5. Inject Portal Library Button into UI
           if [ -f "$LMV_PATH" ]; then
             sed -i '' '/LauncherPreferencesViewController.class/a \
             [LauncherMenuCustomItem vcClass:LauncherNewsViewController.class],' "$LMV_PATH"
